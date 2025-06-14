@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pramod Tech Connect</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f4f4f4;
+      margin: 0;
+      padding: 20px;
+    }
+    h1 {
+      text-align: center;
+      color: #333;
+    }
+    .video-container {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    video {
+      width: 45%;
+      border: 2px solid #333;
+      border-radius: 8px;
+    }
+    .controls, .chat-area, .file-area {
+      max-width: 800px;
+      margin: auto;
+      margin-bottom: 20px;
+      background: #fff;
+      padding: 15px;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+    .controls button, .file-area button {
+      margin: 5px;
+      padding: 10px 18px;
+      font-size: 15px;
+      border: none;
+      border-radius: 6px;
+      background-color: #4CAF50;
+      color: white;
+      cursor: pointer;
+    }
+    .chat-area {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .chat-messages {
+      height: 250px;
+      overflow-y: auto;
+      background: #f0f0f0;
+      border-radius: 8px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      border: 1px solid #ccc;
+    }
+    .chat-messages .you {
+      align-self: flex-end;
+      background-color: #dcf8c6;
+      padding: 8px 12px;
+      border-radius: 15px 15px 0 15px;
+      max-width: 60%;
+      word-wrap: break-word;
+    }
+    .chat-messages .other {
+      align-self: flex-start;
+      background-color: #fff;
+      padding: 8px 12px;
+      border-radius: 15px 15px 15px 0;
+      max-width: 60%;
+      word-wrap: break-word;
+      border: 1px solid #ccc;
+    }
+    #chatInput {
+      flex: 1;
+      padding: 10px;
+      font-size: 14px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      margin-right: 10px;
+    }
+    #sendChat {
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      padding: 10px 16px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h1>Pramod Tech Connect</h1>
+  <div class="video-container">
+    <video id="localVideo" autoplay muted></video>
+    <video id="remoteVideo" autoplay></video>
+  </div>
+  <div class="controls">
+    <input type="text" id="roomInput" placeholder="Enter Room Code (e.g., 55)..." style="padding:10px; border-radius:6px; border:1px solid #ccc; width: 60%; margin-right: 10px;">
+    <button onclick="connectManualRoom()">Join Room</button>
+    <button onclick="toggleMic()">Mic On/Off</button>
+    <button onclick="toggleVideo()">Video On/Off</button>
+    <button onclick="startScreenShare()">Share Screen</button>
+    <button onclick="endCall()" style="background-color: red;">End Call</button>
+  </div>
+  <div class="chat-area">
+    <div class="chat-messages" id="chatMessages"></div>
+    <div style="display: flex; align-items: center;">
+      <input type="text" id="chatInput" placeholder="Type your message..." />
+      <button id="sendChat">Send</button>
+    </div>
+  </div>
+  <div class="file-area">
+    <input type="file" id="fileInput" />
+    <button onclick="sendFile()">Send File</button>
+    <div id="fileList"></div>
+  </div>
+  <script>
+    let localStream;
+    let remoteStream;
+    let peerConnection;
+    let dataChannel;
+    const rooms = {};
+    const config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
+    async function connectManualRoom() {
+      const roomId = document.getElementById("roomInput").value.trim();
+      if (!roomId) return alert("Enter a room code");
+
+      peerConnection = new RTCPeerConnection(config);
+      remoteStream = new MediaStream();
+      document.getElementById("remoteVideo").srcObject = remoteStream;
+
+      localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      document.getElementById("localVideo").srcObject = localStream;
+      localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+
+      peerConnection.ontrack = event => {
+        event.streams[0].getTracks().forEach(track => remoteStream.addTrack(track));
+      };
+
+      peerConnection.ondatachannel = event => {
+        dataChannel = event.channel;
+        setupDataChannel();
+      };
+
+      if (!rooms[roomId]) {
+        dataChannel = peerConnection.createDataChannel("chat");
+        setupDataChannel();
+
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        rooms[roomId] = { offer };
+        alert(`Ask your friend to enter the same code: ${roomId}`);
+      } else {
+        await peerConnection.setRemoteDescription(rooms[roomId].offer);
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+        rooms[roomId].answer = answer;
+        await peerConnection.setRemoteDescription(answer);
+      }
+    }
+
+    function setupDataChannel() {
+      dataChannel.onmessage = e => {
+        if (typeof e.data === 'string') {
+          const chatBox = document.getElementById("chatMessages");
+          const msgDiv = document.createElement("div");
+          msgDiv.className = "other";
+          msgDiv.innerText = e.data;
+          chatBox.appendChild(msgDiv);
+        } else {
+          const blob = new Blob([e.data]);
+          const url = URL.createObjectURL(blob);
+          const fileLink = document.createElement('a');
+          fileLink.href = url;
+          fileLink.download = 'received_file';
+          fileLink.innerText = 'Download received file';
+          fileLink.style.display = 'block';
+          document.getElementById('fileList').appendChild(fileLink);
+        }
+      };
+    }
+
+    document.getElementById("sendChat").onclick = () => {
+      const input = document.getElementById("chatInput");
+      const msg = input.value.trim();
+      if (!msg) return;
+      const chatBox = document.getElementById("chatMessages");
+      const newMsg = document.createElement("div");
+      newMsg.className = "you";
+      newMsg.innerText = msg;
+      chatBox.appendChild(newMsg);
+      input.value = "";
+      dataChannel?.send(msg);
+    };
+
+    function toggleMic() {
+      if (localStream) {
+        localStream.getAudioTracks().forEach(track => track.enabled = !track.enabled);
+      }
+    }
+
+    function toggleVideo() {
+      if (localStream) {
+        localStream.getVideoTracks().forEach(track => track.enabled = !track.enabled);
+      }
+    }
+
+    async function startScreenShare() {
+      try {
+        const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        screenStream.getTracks().forEach(track => peerConnection.addTrack(track, screenStream));
+        document.getElementById('localVideo').srcObject = screenStream;
+      } catch (err) {
+        alert("Screen share not allowed");
+      }
+    }
+
+    function sendFile() {
+      const fileInput = document.getElementById('fileInput');
+      const file = fileInput.files[0];
+      if (!file || !dataChannel) return alert("No file or connection");
+      const reader = new FileReader();
+      reader.onload = () => {
+        dataChannel.send(reader.result);
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    function endCall() {
+      if (peerConnection) {
+        peerConnection.close();
+        peerConnection = null;
+      }
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+        localStream = null;
+      }
+      if (remoteStream) {
+        remoteStream.getTracks().forEach(track => track.stop());
+        remoteStream = null;
+      }
+      document.getElementById("localVideo").srcObject = null;
+      document.getElementById("remoteVideo").srcObject = null;
+      alert("Call ended");
+    }
+  </script>
+</body>
+</html>
